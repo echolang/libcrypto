@@ -1,0 +1,135 @@
+use crypto::{seal, open, secretKey, OpenError, SealError};
+
+// draft-irtf-cfrg-xchacha A.3.1, laid out nonce || ciphertext || tag, which
+// is also exactly what libsodium produces for it
+
+private function vectorKey() : string
+{
+    return raw('808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f');
+}
+
+private function vectorSealed() : string
+{
+    return raw('404142434445464748494a4b4c4d4e4f5051525354555657bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52ec0875924c1c7987947deafd8780acf49');
+}
+
+private function vectorAd() : string
+{
+    return raw('50515253c0c1c2c3c4c5c6c7');
+}
+
+private function isForged(result<string, OpenError> $r) : bool
+{
+    if (!$r->failed()) {
+        return false;
+    }
+
+    return match ($r->failure()) {
+        OpenError::forged => true,
+        else => false,
+    };
+}
+
+test open_known_vector
+{
+    string $plain = guard open(vectorKey(), vectorSealed(), vectorAd());
+
+    assert($plain == "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.");
+}
+
+test open_known_empty_message
+{
+    string $sealed = raw('404142434445464748494a4b4c4d4e4f50515253545556571dac8f73146d1e9da796cb7f7221a5df');
+    string $plain = guard open(vectorKey(), $sealed);
+
+    assert($plain->empty());
+}
+
+test open_rejects_wrong_ad
+{
+    assert(isForged(open(vectorKey(), vectorSealed(), 'other')));
+    assert(isForged(open(vectorKey(), vectorSealed())));
+}
+
+test open_rejects_any_flipped_byte
+{
+    string $good = vectorSealed();
+    string $key = vectorKey();
+    string $ad = vectorAd();
+    usize $i = 0;
+
+    // nonce, ciphertext and tag all count
+    while ($i < $good->size()) {
+        assert(isForged(open($key, flipped($good, $i), $ad)));
+        $i = $i + 1;
+    }
+}
+
+test open_rejects_short_input
+{
+    $r = open(vectorKey(), 'too short');
+
+    assert($r->failed());
+    assert(match ($r->failure()) {
+        OpenError::truncated => true,
+        else => false,
+    });
+}
+
+test seal_round_trip
+{
+    string $key = guard secretKey();
+    string $sealed = guard seal($key, 'attack at dawn', 'user:42');
+
+    assert($sealed->size() == 24 + 14 + 16);
+
+    string $plain = guard open($key, $sealed, 'user:42');
+
+    assert($plain == 'attack at dawn');
+    assert(isForged(open($key, $sealed, 'user:43')));
+}
+
+test seal_round_trip_empty_and_large
+{
+    string $key = guard secretKey();
+    string $big = str::repeat('0123456789abcdef', 4096);
+
+    string $empty = guard seal($key, '');
+    string $large = guard seal($key, $big);
+    string $a = guard open($key, $empty);
+    string $b = guard open($key, $large);
+
+    assert($a->empty());
+    assert($b == $big);
+}
+
+test seal_nonces_differ
+{
+    string $key = guard secretKey();
+    string $one = guard seal($key, 'same');
+    string $two = guard seal($key, 'same');
+
+    assert($one != $two);
+}
+
+test wrong_key_size_is_an_error
+{
+    $s = seal('short', 'x');
+
+    assert($s->failed());
+    assert(match ($s->failure()) {
+        SealError::keySize($got) => $got == 5,
+        else => false,
+    });
+
+    $o = open('short', vectorSealed());
+
+    assert($o->failed());
+}
+
+test wrong_key_fails
+{
+    string $other = guard secretKey();
+
+    assert(isForged(open($other, vectorSealed(), vectorAd())));
+}

@@ -1,0 +1,48 @@
+use crypto::{sha256, hex, Sha256};
+
+// FIPS 180-2 appendix B vectors
+
+test sha256_empty
+{
+    assert(hex(sha256('')) == 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+}
+
+test sha256_abc
+{
+    assert(hex(sha256('abc')) == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+}
+
+test sha256_two_blocks
+{
+    string $msg = 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq';
+
+    assert(hex(sha256($msg)) == '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
+}
+
+test sha256_million_a
+{
+    $chunk = str::repeat('a', 1000);
+    $hasher = Sha256();
+    usize $i = 0;
+
+    while ($i < 1000) {
+        $hasher->update($chunk);
+        $i = $i + 1;
+    }
+
+    assert(hex($hasher->finish()) == 'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0');
+}
+
+test sha256_incremental_matches_one_shot
+{
+    Sha256 $hasher = Sha256();
+
+    // split mid-block and across the 56 byte padding boundary
+    $hasher->update('abcdbcdecdefdefgefghfghighijhijkijkl');
+    $hasher->update('jklmklmnlmnomnopnopq');
+    assert(hex($hasher->finish()) == '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
+
+    // finish reset the hasher, so it can go again
+    $hasher->update('abc');
+    assert(hex($hasher->finish()) == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+}

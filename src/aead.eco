@@ -1,0 +1,111 @@
+/**
+ * Authenticated encryption: XChaCha20-Poly1305. `seal` locks a message under
+ * a 32 byte key, `open` gets it back or tells you it was tampered with.
+ *
+ * A sealed message is the 24 byte nonce, then the ciphertext, then the
+ * 16 byte tag. That is libsodium's crypto_aead_xchacha20poly1305_ietf in
+ * combined mode with the nonce in front, so either side can be libsodium.
+ */
+
+namespace crypto;
+
+public const KEY_BYTES = 32;
+public const NONCE_BYTES = 24;
+public const TAG_BYTES = 16;
+
+public enum SealError
+{
+    /**
+     * The key was `$got` bytes, and a key is exactly 32.
+     */
+    case keySize(usize $got);
+
+    /**
+     * The operating system would not hand out a nonce.
+     */
+    case noRandomness(RandomError $cause);
+}
+
+public enum OpenError
+{
+    /**
+     * The key was `$got` bytes, and a key is exactly 32.
+     */
+    case keySize(usize $got);
+
+    /**
+     * Too short to be anything `seal` produced: less than a nonce and a tag.
+     */
+    case truncated;
+
+    /**
+     * The tag did not check out. Wrong key, wrong associated data, or
+     * someone changed the bytes. Nothing of the plaintext is returned.
+     */
+    case forged;
+}
+
+/**
+ * A new random 32 byte key for `seal` and `open`.
+ */
+public function secretKey() : result<string, RandomError>
+{
+    return random(KEY_BYTES);
+}
+
+/**
+ * `$message` encrypted and authenticated under `$key`. `$ad` is associated
+ * data: not encrypted, not included in the output, but `open` needs the
+ * same bytes or it fails. Use it to bind a message to its context, like a
+ * user id or a header. The nonce is random and 24 bytes long, so a key can
+ * seal as many messages as you will ever send without a nonce repeating.
+ */
+public function seal(const string& $key, const string& $message, const string& $ad = '') : result<string, SealError>
+{
+    if ($key->size() != KEY_BYTES) {
+        return .error(.keySize($key->size()));
+    }
+
+    usize $size = $message->size();
+    $out = '';
+    $nonce = room($out, NONCE_BYTES + $size + TAG_BYTES);
+
+    // the nonce is the head of the output, so it is written once and never copied
+    guard fill($nonce, NONCE_BYTES) else ($e) {
+        return .error(.noRandomness($e));
+    }
+
+    $cipher = $nonce:$ + NONCE_BYTES;
+
+    c_aead_lock($cipher, $cipher:$ + $size, $key->data(), $nonce, $ad->data(), $ad->size(), $message->data(), $size);
+    $out->commit(NONCE_BYTES + $size + TAG_BYTES);
+    return .ok($out);
+}
+
+/**
+ * The plaintext of something `seal` produced under `$key` and `$ad`, or why
+ * not. A forged or damaged message is always an error, never garbage.
+ */
+public function open(const string& $key, const string& $sealed, const string& $ad = '') : result<string, OpenError>
+{
+    if ($key->size() != KEY_BYTES) {
+        return .error(.keySize($key->size()));
+    }
+
+    if ($sealed->size() < NONCE_BYTES + TAG_BYTES) {
+        return .error(.truncated);
+    }
+
+    usize $size = $sealed->size() - NONCE_BYTES - TAG_BYTES;
+    $nonce = $sealed->data();
+    $cipher = $nonce:$ + NONCE_BYTES;
+    $out = '';
+    $plain = room($out, $size);
+
+    if (c_aead_unlock($plain, $cipher:$ + $size, $key->data(), $nonce, $ad->data(), $ad->size(), $cipher, $size) != 0) {
+        return .error(.forged);
+    }
+
+    $out->commit($size);
+    return .ok($out);
+}

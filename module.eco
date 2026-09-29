@@ -1,0 +1,31 @@
+/*
+ * libcrypto: the cryptography Echo programs keep needing and the standard
+ * library does not have.
+ *
+ * Authenticated encryption, signatures, key exchange, BLAKE2b, Argon2id,
+ * SHA-512 and HMAC-SHA512 come from Monocypher, vendored under c/ and
+ * compiled with the module.
+ * SHA-256, SHA-1, MD5, HMAC-SHA256, HMAC-SHA1, hex and the constant-time
+ * compare are pure Echo.
+ * Randomness comes from the operating system.
+ */
+
+#[module: "libcrypto"]
+#[version: "0.3.0"]
+#[epm::license: "MIT"]
+#[epm::description: "authenticated encryption, signatures, key exchange, blake2b, argon2id, sha512, sha256, sha1, md5 and hmac for echolang"]
+
+#[sources: "src/*.eco"]
+
+#[cc: sources "c/*.c"]
+#[cc: include "c/include"]
+#[cc: flag "-O2"]
+
+// BCryptGenRandom lives in bcrypt, which is not on echoc's default windows link line
+#[if: os == windows]
+#[link: lib "bcrypt"]
+#[end]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

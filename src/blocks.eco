@@ -1,0 +1,120 @@
+/**
+ * The Merkle–Damgård plumbing MD5, SHA-1 and SHA-256 share: buffering input
+ * into 64 byte blocks, the final padding, and starting over. Each hash only
+ * brings its chaining state as a `Compressor`.
+ */
+
+namespace crypto;
+
+/**
+ * The chaining state of one hash, as it stands before the first block.
+ */
+internal interface Compressor
+{
+    /**
+     * Mixes the 64 bytes of `$block` from `$at` into the state.
+     */
+    function compress(const string& $block, usize $at) : void;
+
+    /**
+     * The state written out as the digest.
+     */
+    const function digest() : string;
+}
+
+internal struct Blocks<C: Compressor>
+{
+    private C $fresh;
+    private C $state;
+    private bool $little;
+    private string $pending;
+    private uint64 $length;
+
+    /**
+     * Starts from `$fresh`, and writes the message length little-endian when
+     * `$little` is set (MD5) and big-endian otherwise (SHA).
+     */
+    public constructor(C $fresh, bool $little)
+    {
+        $this->fresh = $fresh;
+        $this->state = $fresh;
+        $this->little = $little;
+        $this->pending = '';
+        $this->length = 0;
+    }
+
+    /**
+     * Full 64 byte blocks are compressed straight out of `$data`, only a
+     * tail under 64 bytes is buffered.
+     */
+    public function update(const string& $data) : void
+    {
+        $this->length = $this->length + ($data->size() as uint64);
+
+        usize $at = 0;
+
+        // top up a block left over from the last call before touching $data directly
+        if (!$this->pending->empty()) {
+            $at = 64 - $this->pending->size();
+
+            if ($at > $data->size()) {
+                $at = $data->size();
+            }
+
+            $this->pending->append($data->sub(0, $at));
+
+            if ($this->pending->size() < 64) {
+                return;
+            }
+
+            $this->state->compress($this->pending, 0);
+            $this->pending->clear();
+        }
+
+        while ($at + 64 <= $data->size()) {
+            $this->state->compress($data, $at);
+            $at = $at + 64;
+        }
+
+        if ($at < $data->size()) {
+            $this->pending->append($data->sub($at, $data->size() - $at));
+        }
+    }
+
+    /**
+     * Pads the message, compresses the last block or two, and returns the
+     * digest. Everything starts over afterwards.
+     */
+    public function finish() : string
+    {
+        uint64 $bits = $this->length * 8;
+
+        // a 1 bit, zeros to 56 mod 64, then the bit length
+        $this->pending->push(0x80 as uint8);
+
+        while ($this->pending->size() % 64 != 56) {
+            $this->pending->push(0 as uint8);
+        }
+
+        if ($this->little) {
+            pushLE($this->pending, $bits, 8);
+        } else {
+            pushBE($this->pending, $bits, 8);
+        }
+
+        usize $at = 0;
+
+        while ($at < $this->pending->size()) {
+            $this->state->compress($this->pending, $at);
+            $at = $at + 64;
+        }
+
+        $out = $this->state->digest();
+
+        // clear keeps the allocation for the next message
+        $this->state = $this->fresh;
+        $this->pending->clear();
+        $this->length = 0;
+        return $out;
+    }
+}

@@ -1,0 +1,45 @@
+/**
+ * Every Monocypher and shim symbol the module calls, and nothing else; the
+ * libc calls for randomness live in random.eco. Monocypher is vendored under
+ * c/ and compiled with the module, so consumers link nothing.
+ * None of this is public: the wrappers check sizes before anything reaches C,
+ * because Monocypher trusts them.
+ */
+
+namespace crypto;
+
+internal extern struct Blake2bCtx;
+
+internal extern {
+    function crypto_aead_lock as c_aead_lock(ptr<uint8> $cipher, ptr<uint8> $mac, ptr<const uint8> $key, ptr<const uint8> $nonce, ptr<const uint8> $ad, usize $adSize, ptr<const uint8> $plain, usize $size) : void;
+    function crypto_aead_unlock as c_aead_unlock(ptr<uint8> $plain, ptr<const uint8> $mac, ptr<const uint8> $key, ptr<const uint8> $nonce, ptr<const uint8> $ad, usize $adSize, ptr<const uint8> $cipher, usize $size) : int32;
+
+    function crypto_blake2b_keyed as c_blake2b(ptr<uint8> $hash, usize $hashSize, ptr<const uint8> $key, usize $keySize, ptr<const uint8> $message, usize $size) : void;
+    function crypto_blake2b_keyed_init as c_blake2b_init(ptr<Blake2bCtx> $ctx, usize $hashSize, ptr<const uint8> $key, usize $keySize) : void;
+    function crypto_blake2b_update as c_blake2b_update(ptr<Blake2bCtx> $ctx, ptr<const uint8> $message, usize $size) : void;
+    function crypto_blake2b_final as c_blake2b_final(ptr<Blake2bCtx> $ctx, ptr<uint8> $hash) : void;
+    function libcrypto_blake2b_new as c_blake2b_new(usize $hashSize, ptr<const uint8> $key, usize $keySize) : ptr<Blake2bCtx>;
+    function libcrypto_blake2b_free as c_blake2b_free(ptr<Blake2bCtx> $ctx) : void;
+
+    function crypto_x25519_public_key as c_x25519_public_key(ptr<uint8> $public, ptr<const uint8> $secret) : void;
+    function crypto_x25519 as c_x25519(ptr<uint8> $shared, ptr<const uint8> $secret, ptr<const uint8> $theirPublic) : void;
+
+    function libcrypto_ed25519_key_pair as c_ed25519_key_pair(ptr<uint8> $secret, ptr<uint8> $public, ptr<const uint8> $seed) : void;
+    function crypto_ed25519_sign as c_ed25519_sign(ptr<uint8> $signature, ptr<const uint8> $secret, ptr<const uint8> $message, usize $size) : void;
+    function crypto_ed25519_check as c_ed25519_check(ptr<const uint8> $signature, ptr<const uint8> $public, ptr<const uint8> $message, usize $size) : int32;
+
+    function crypto_sha512 as c_sha512(ptr<uint8> $hash, ptr<const uint8> $message, usize $size) : void;
+    function crypto_sha512_hmac as c_sha512_hmac(ptr<uint8> $mac, ptr<const uint8> $key, usize $keySize, ptr<const uint8> $message, usize $size) : void;
+
+    function libcrypto_argon2id as c_argon2id(ptr<uint8> $hash, uint32 $hashSize, ptr<const uint8> $pass, uint32 $passSize, ptr<const uint8> $salt, uint32 $saltSize, uint32 $blocks, uint32 $passes, uint32 $lanes) : int32;
+}
+
+/**
+ * A fresh string of `$n` bytes for C to fill, handed back with the pointer
+ * to write through. The caller commits once C is done.
+ */
+internal function room(string& $out, usize $n) : ptr<uint8>
+{
+    $out->reserve($n);
+    return $out->spare();
+}

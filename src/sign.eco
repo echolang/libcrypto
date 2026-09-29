@@ -1,0 +1,102 @@
+/**
+ * Ed25519 signatures (RFC 8032). A `SigningKey` signs, anyone holding its
+ * 32 byte public key can `verify`. Compatible with libsodium's crypto_sign
+ * and every other Ed25519 out there.
+ */
+
+namespace crypto;
+
+public const SEED_BYTES = 32;
+public const PUBLIC_KEY_BYTES = 32;
+public const SIGNATURE_BYTES = 64;
+
+// monocypher's secret key is the seed followed by the public key
+private const SECRET_KEY_BYTES = SEED_BYTES + PUBLIC_KEY_BYTES;
+
+/**
+ * An Ed25519 key that can sign. The whole secret is the 32 byte seed, so
+ * that is what you store; `restore` rebuilds the key from it.
+ */
+public struct SigningKey
+{
+    private string $secret;
+
+    private constructor(const string& $seed)
+    {
+        $this->secret = '';
+
+        $secret = room($this->secret, SECRET_KEY_BYTES);
+
+        // the public key half of the secret is written by the same call
+        c_ed25519_key_pair($secret, $secret:$ + SEED_BYTES, $seed->data());
+        $this->secret->commit(SECRET_KEY_BYTES);
+    }
+
+    /**
+     * A new key from operating system randomness.
+     */
+    public static function generate() : result<SigningKey, RandomError>
+    {
+        $seed = guard random(SEED_BYTES) else ($e) {
+            return .error($e);
+        }
+
+        return .ok(SigningKey($seed));
+    }
+
+    /**
+     * The key a 32 byte seed stands for. Null when the seed is the wrong
+     * size.
+     */
+    public static function restore(const string& $seed) : SigningKey?
+    {
+        if ($seed->size() != SEED_BYTES) {
+            return null;
+        }
+
+        return SigningKey($seed);
+    }
+
+    /**
+     * The 32 byte seed. Keep it secret; it is the whole key.
+     */
+    public const function seed() : string
+    {
+        return $this->secret->sub(0, SEED_BYTES);
+    }
+
+    /**
+     * The 32 byte public key, the half you hand out.
+     */
+    public const function publicKey() : string
+    {
+        return $this->secret->sub(SEED_BYTES, PUBLIC_KEY_BYTES);
+    }
+
+    /**
+     * The 64 byte signature of `$message`. Deterministic: the same key and
+     * message always give the same signature.
+     */
+    public const function sign(const string& $message) : string
+    {
+        $out = '';
+        $p = room($out, SIGNATURE_BYTES);
+
+        c_ed25519_sign($p, $this->secret->data(), $message->data(), $message->size());
+        $out->commit(SIGNATURE_BYTES);
+        return $out;
+    }
+}
+
+/**
+ * Whether `$signature` is a valid signature of `$message` by the owner of
+ * `$publicKey`. Anything of the wrong size is simply not valid.
+ */
+public function verify(const string& $publicKey, const string& $message, const string& $signature) : bool
+{
+    if ($publicKey->size() != PUBLIC_KEY_BYTES || $signature->size() != SIGNATURE_BYTES) {
+        return false;
+    }
+
+    return c_ed25519_check($signature->data(), $publicKey->data(), $message->data(), $message->size()) == 0;
+}

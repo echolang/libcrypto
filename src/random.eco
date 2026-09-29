@@ -1,0 +1,100 @@
+/**
+ * Randomness from the operating system: `arc4random_buf` on darwin,
+ * `getrandom` on linux and `BCryptGenRandom` on windows. The first two come
+ * from libc and the third from bcrypt, which module.eco links on windows, so
+ * this file needs no C of its own.
+ */
+
+namespace crypto;
+
+public enum RandomError
+{
+    /**
+     * The kernel refused to hand out random bytes. `$code` is what the call
+     * returned.
+     */
+    case unavailable(int64 $code);
+}
+
+#[if: family == darwin]
+internal extern {
+    function arc4random_buf(ptr<uint8> $buf, usize $n) : void;
+}
+#[elif: family == linux]
+internal extern {
+    function getrandom(ptr<uint8> $buf, usize $n, uint32 $flags) : isize;
+}
+#[elif: family == windows]
+internal extern {
+    function BCryptGenRandom(ptr<uint8> $alg, ptr<uint8> $buf, uint32 $n, uint32 $flags) : int32;
+}
+
+internal const uint32 BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
+internal const uint32 BCRYPT_MAX_CHUNK = 4294967295;
+#[end]
+
+/**
+ * `$n` bytes of cryptographically secure randomness, straight from the
+ * operating system. Good for session ids, tokens and keys.
+ */
+public function random(usize $n) : result<string, RandomError>
+{
+    $out = '';
+
+    if ($n == 0) {
+        return .ok($out);
+    }
+
+    guard fill(room($out, $n), $n) else ($e) {
+        return .error($e);
+    }
+
+    $out->commit($n);
+    return .ok($out);
+}
+
+/**
+ * Writes `$n` random bytes to `$buf`, for callers that already hold the
+ * buffer the bytes belong in.
+ */
+internal function fill(ptr<uint8> $buf, usize $n) : status<RandomError>
+{
+#[if: family == darwin]
+    arc4random_buf($buf, $n);
+#[elif: family == linux]
+    usize $filled = 0;
+
+    // getrandom may return short for large requests or when a signal lands
+    while ($filled < $n) {
+        isize $got = getrandom($buf:$ + $filled, $n - $filled, 0);
+
+        if ($got < 0) {
+            return .error(.unavailable($got as int64));
+        }
+
+        $filled = $filled + ($got as usize);
+    }
+#[elif: family == windows]
+    usize $filled = 0;
+
+    // the length is a ULONG, so anything past 4 GiB goes in more than one call
+    while ($filled < $n) {
+        uint32 $chunk = BCRYPT_MAX_CHUNK;
+
+        if ($n - $filled < BCRYPT_MAX_CHUNK as usize) {
+            $chunk = ($n - $filled) as uint32;
+        }
+
+        int32 $status = BCryptGenRandom(
+            ptr<uint8>(null), $buf:$ + $filled, $chunk, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+
+        if ($status != 0) {
+            return .error(.unavailable($status as int64));
+        }
+
+        $filled = $filled + ($chunk as usize);
+    }
+#[end]
+
+    return .ok;
+}

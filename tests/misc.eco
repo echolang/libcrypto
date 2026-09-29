@@ -1,0 +1,45 @@
+use crypto::{equal, hex, unhex, random};
+
+test equal_same_bytes
+{
+    assert(equal('', ''));
+    assert(equal('secret', 'secret'));
+}
+
+test equal_differs
+{
+    assert(!equal('secret', 'secreT'));
+    assert(!equal('Secret', 'secret'));
+    assert(!equal('secret', 'secrets'));
+    assert(!equal('secrets', 'secret'));
+    assert(!equal('', 'x'));
+}
+
+test hex_round_trip
+{
+    string $raw = guard unhex('00ff10Ab');
+
+    assert($raw->size() == 4);
+    assert($raw->byte(0) == 0);
+    assert($raw->byte(1) == 255);
+    assert(hex($raw) == '00ff10ab');
+}
+
+test unhex_rejects_bad_input
+{
+    assert(unhex('abc') == null);
+    assert(unhex('zz') == null);
+}
+
+test random_gives_what_was_asked
+{
+    string $a = guard random(16);
+    string $b = guard random(16);
+    string $none = guard random(0);
+
+    assert($a->size() == 16);
+    assert($b->size() == 16);
+    assert($none->size() == 0);
+    // 2^-128, the day this fails is the day to buy a lottery ticket
+    assert(!equal($a, $b));
+}

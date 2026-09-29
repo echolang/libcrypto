@@ -1,0 +1,140 @@
+/**
+ * Key exchange over X25519 (RFC 7748). Two sides each make an
+ * `ExchangeKey`, swap public keys, and `agree` on the same 32 byte secret
+ * without it ever crossing the wire. Feed that to `seal` and `open`.
+ */
+
+namespace crypto;
+
+// secrets, public keys and the agreed key are all 32 bytes in X25519
+private const X25519_BYTES = 32;
+
+public enum AgreeError
+{
+    /**
+     * Their public key was `$got` bytes, and a public key is exactly 32.
+     */
+    case publicKeySize(usize $got);
+
+    /**
+     * Their public key is a low order point, which would make the shared
+     * secret all zeros whatever our key is. Nobody honest sends one.
+     */
+    case weakKey;
+}
+
+/**
+ * An X25519 key for agreeing on secrets. The 32 byte secret is the whole
+ * key, so that is what you store; `restore` rebuilds it.
+ */
+public struct ExchangeKey
+{
+    private string $secret;
+    private string $pk;
+
+    private constructor(const string& $secret)
+    {
+        $this->secret = $secret;
+        $this->pk = '';
+
+        $p = room($this->pk, X25519_BYTES);
+
+        c_x25519_public_key($p, $secret->data());
+        $this->pk->commit(X25519_BYTES);
+    }
+
+    /**
+     * A new key from operating system randomness.
+     */
+    public static function generate() : result<ExchangeKey, RandomError>
+    {
+        $secret = guard random(X25519_BYTES) else ($e) {
+            return .error($e);
+        }
+
+        return .ok(ExchangeKey($secret));
+    }
+
+    /**
+     * The key a 32 byte secret stands for. Null when the secret is the wrong
+     * size.
+     */
+    public static function restore(const string& $secret) : ExchangeKey?
+    {
+        if ($secret->size() != X25519_BYTES) {
+            return null;
+        }
+
+        return ExchangeKey($secret);
+    }
+
+    /**
+     * The 32 byte secret. Keep it secret; it is the whole key.
+     */
+    public const function secret() : string
+    {
+        return $this->secret;
+    }
+
+    /**
+     * The 32 byte public key, the half you send to the other side.
+     */
+    public const function publicKey() : string
+    {
+        return $this->pk;
+    }
+
+    /**
+     * The 32 byte key both sides arrive at, given the other side's public
+     * key. It is BLAKE2b of the raw X25519 output and both public keys in a
+     * fixed order, so it is uniform, bound to this pair, and the same no
+     * matter which side computes it.
+     */
+    public const function agree(const string& $theirPublic) : result<string, AgreeError>
+    {
+        if ($theirPublic->size() != X25519_BYTES) {
+            return .error(.publicKeySize($theirPublic->size()));
+        }
+
+        // room for both public keys too, which get appended below
+        $raw = '';
+        $p = room($raw, 3 * X25519_BYTES);
+
+        c_x25519($p, $this->secret->data(), $theirPublic->data());
+        $raw->commit(X25519_BYTES);
+
+        // all zeros means a low order point
+        if (zero($raw)) {
+            return .error(.weakKey);
+        }
+
+        // public keys are public, so ordering them by value leaks nothing
+        if (before($this->pk, $theirPublic)) {
+            $raw->append($this->pk);
+            $raw->append($theirPublic);
+        } else {
+            $raw->append($theirPublic);
+            $raw->append($this->pk);
+        }
+
+        return .ok(blake2b($raw));
+    }
+}
+
+/**
+ * Whether `$a` sorts before `$b`, byte by byte. Both are the same length.
+ */
+private function before(const string& $a, const string& $b) : bool
+{
+    usize $i = 0;
+
+    while ($i < $a->size()) {
+        if ($a->byte($i) != $b->byte($i)) {
+            return $a->byte($i) < $b->byte($i);
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}

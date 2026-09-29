@@ -1,0 +1,74 @@
+/**
+ * Hex, the encoding every digest ends up in sooner or later.
+ */
+
+namespace crypto;
+
+/**
+ * Lowercase hex of the raw bytes in `$raw`, two characters per byte.
+ */
+public function hex(const string& $raw) : string
+{
+    $digits = '0123456789abcdef';
+    $out = '';
+    usize $i = 0;
+
+    $out->reserve($raw->size() * 2);
+
+    while ($i < $raw->size()) {
+        uint8 $b = $raw->byte($i);
+
+        $out->push($digits->byte(($b >> 4) as usize));
+        $out->push($digits->byte(($b & 15) as usize));
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * The raw bytes spelled by the hex in `$text`, either case. Null when the
+ * length is odd or a character is not a hex digit.
+ */
+public function unhex(const string& $text) : string?
+{
+    if ($text->size() % 2 != 0) {
+        return null;
+    }
+
+    $out = '';
+    usize $i = 0;
+
+    $out->reserve($text->size() / 2);
+
+    while ($i < $text->size()) {
+        int32 $hi = nibble($text->byte($i));
+        int32 $lo = nibble($text->byte($i + 1));
+
+        if ($hi < 0 || $lo < 0) {
+            return null;
+        }
+
+        $out->push((($hi << 4) | $lo) as uint8);
+        $i = $i + 2;
+    }
+
+    return $out;
+}
+
+private function nibble(uint8 $c) : int32
+{
+    if ($c >= 48 && $c <= 57) {
+        return ($c as int32) - 48;
+    }
+
+    if ($c >= 97 && $c <= 102) {
+        return ($c as int32) - 87;
+    }
+
+    if ($c >= 65 && $c <= 70) {
+        return ($c as int32) - 55;
+    }
+
+    return -1;
+}

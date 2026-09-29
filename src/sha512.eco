@@ -1,0 +1,33 @@
+/**
+ * SHA-512 and HMAC-SHA512, from the Monocypher half that Ed25519 needs
+ * anyway. One-shot only.
+ */
+
+namespace crypto;
+
+/**
+ * The SHA-512 digest of `$data`, as its 64 raw bytes.
+ */
+public function sha512(const string& $data) : string
+{
+    $out = '';
+    $p = room($out, 64);
+
+    c_sha512($p, $data->data(), $data->size());
+    $out->commit(64);
+    return $out;
+}
+
+/**
+ * The HMAC-SHA512 of `$data` under `$key`, as its 64 raw bytes. Any key
+ * length works; longer than 128 bytes is hashed first, as RFC 2104 says.
+ */
+public function hmacSha512(const string& $key, const string& $data) : string
+{
+    $out = '';
+    $p = room($out, 64);
+
+    c_sha512_hmac($p, $key->data(), $key->size(), $data->data(), $data->size());
+    $out->commit(64);
+    return $out;
+}

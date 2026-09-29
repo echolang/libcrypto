@@ -1,0 +1,48 @@
+use crypto::{sha1, hex, Sha1};
+
+// FIPS 180 appendix A vectors
+
+test sha1_empty
+{
+    assert(hex(sha1('')) == 'da39a3ee5e6b4b0d3255bfef95601890afd80709');
+}
+
+test sha1_abc
+{
+    assert(hex(sha1('abc')) == 'a9993e364706816aba3e25717850c26c9cd0d89d');
+}
+
+test sha1_two_blocks
+{
+    string $msg = 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq';
+
+    assert(hex(sha1($msg)) == '84983e441c3bd26ebaae4aa1f95129e5e54670f1');
+}
+
+test sha1_million_a
+{
+    $chunk = str::repeat('a', 1000);
+    $hasher = Sha1();
+    usize $i = 0;
+
+    while ($i < 1000) {
+        $hasher->update($chunk);
+        $i = $i + 1;
+    }
+
+    assert(hex($hasher->finish()) == '34aa973cd4c4daa4f61eeb2bdbad27316534016f');
+}
+
+test sha1_incremental_matches_one_shot
+{
+    Sha1 $hasher = Sha1();
+
+    // split mid-block and across the 56 byte padding boundary
+    $hasher->update('abcdbcdecdefdefgefghfghighijhijkijkl');
+    $hasher->update('jklmklmnlmnomnopnopq');
+    assert(hex($hasher->finish()) == '84983e441c3bd26ebaae4aa1f95129e5e54670f1');
+
+    // finish reset the hasher, so it can go again
+    $hasher->update('abc');
+    assert(hex($hasher->finish()) == 'a9993e364706816aba3e25717850c26c9cd0d89d');
+}

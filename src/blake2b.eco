@@ -1,0 +1,122 @@
+/**
+ * BLAKE2b (RFC 7693), one-shot and incremental, plain or keyed. Faster than
+ * SHA-256 in software and a MAC on its own when given a key, so it is the
+ * hash to reach for unless something outside your program picks SHA-256.
+ */
+
+namespace crypto;
+
+/**
+ * An incremental BLAKE2b. Feed it with `update` as often as you like, then
+ * `finish` hands back the digest and resets the hasher, the same shape as
+ * `Sha256`. The state lives on the C heap and is wiped when the hasher dies.
+ */
+public class Blake2b
+{
+    private ptr<Blake2bCtx> $ctx;
+    private usize $size;
+    private string $key;
+
+    /**
+     * A plain hasher producing `$size` bytes, 1 to 64. Out of range is a bug
+     * in the caller and stops the program.
+     */
+    public constructor(usize $size = 32)
+    {
+        $this->size = checkedSize($size);
+        $this->key = '';
+    }
+
+    /**
+     * A keyed hasher, which is a MAC. The key is 1 to 64 bytes; 32 is the
+     * usual choice.
+     */
+    public constructor(key: const string& $key, usize $size = 32)
+    {
+        $this->size = checkedSize($size);
+        $this->key = checkedKey($key);
+    }
+
+    init
+    {
+        $this->ctx = c_blake2b_new($this->size, $this->key->data(), $this->key->size());
+
+        if ($this->ctx == null) {
+            die('crypto: out of memory for a BLAKE2b context');
+        }
+    }
+
+    destructor()
+    {
+        c_blake2b_free($this->ctx);
+    }
+
+    /**
+     * Appends `$data` to the message.
+     */
+    public function update(const string& $data) : void
+    {
+        c_blake2b_update($this->ctx, $data->data(), $data->size());
+    }
+
+    /**
+     * The digest of everything passed to `update` since the last `finish`,
+     * as raw bytes. The hasher starts over afterwards, with the same key.
+     */
+    public function finish() : string
+    {
+        $out = '';
+        $p = room($out, $this->size);
+
+        // final wipes the context, so the same allocation starts over in place
+        c_blake2b_final($this->ctx, $p);
+        $out->commit($this->size);
+        c_blake2b_init($this->ctx, $this->size, $this->key->data(), $this->key->size());
+        return $out;
+    }
+}
+
+/**
+ * The BLAKE2b digest of `$data`, `$size` bytes long (1 to 64, 32 unless
+ * you say otherwise).
+ */
+public function blake2b(const string& $data, usize $size = 32) : string
+{
+    return blake2bKeyed('', $data, checkedSize($size));
+}
+
+/**
+ * The keyed BLAKE2b of `$data`, which is a MAC. The key is 1 to 64 bytes.
+ */
+public function blake2b(key: const string& $key, const string& $data, usize $size = 32) : string
+{
+    return blake2bKeyed(checkedKey($key), $data, checkedSize($size));
+}
+
+private function blake2bKeyed(const string& $key, const string& $data, usize $size) : string
+{
+    $out = '';
+    $p = room($out, $size);
+
+    c_blake2b($p, $size, $key->data(), $key->size(), $data->data(), $data->size());
+    $out->commit($size);
+    return $out;
+}
+
+private function checkedSize(usize $size) : usize
+{
+    if ($size == 0 || $size > 64) {
+        die('crypto: a BLAKE2b digest is 1 to 64 bytes');
+    }
+
+    return $size;
+}
+
+private function checkedKey(const string& $key) : string
+{
+    if ($key->empty() || $key->size() > 64) {
+        die('crypto: a BLAKE2b key is 1 to 64 bytes');
+    }
+
+    return $key;
+}

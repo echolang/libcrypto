@@ -1,0 +1,145 @@
+/**
+ * SHA-1 (FIPS 180-4), one-shot and incremental.
+ *
+ * SHA-1 is broken for collisions. It's here for the things that still ask
+ * for it, like TOTP, git object ids and older webhook signatures, not for
+ * anything new.
+ */
+
+namespace crypto;
+
+/**
+ * The SHA-1 chaining state. It sits above `Sha1` because a struct's
+ * conformance is only seen from below its declaration.
+ */
+internal struct Sha1State : Compressor
+{
+    private fixed_array<uint32, 5> $h;
+
+    public constructor()
+    {
+        $this->h[0] = 0x67452301;
+        $this->h[1] = 0xefcdab89;
+        $this->h[2] = 0x98badcfe;
+        $this->h[3] = 0x10325476;
+        $this->h[4] = 0xc3d2e1f0;
+    }
+
+    public const function digest() : string
+    {
+        $out = '';
+        usize $i = 0;
+
+        $out->reserve(20);
+
+        while ($i < 5) {
+            pushBE($out, $this->h[$i] as uint64, 4);
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+
+    public function compress(const string& $block, usize $at) : void
+    {
+        fixed_array<uint32, 5>& $h = $this->h;
+        fixed_array<uint32, 80> $w;
+        usize $t = 0;
+
+        while ($t < 16) {
+            $w[$t] = readBE($block, $at + $t * 4, 4) as uint32;
+            $t = $t + 1;
+        }
+
+        while ($t < 80) {
+            $w[$t] = rotl($w[$t - 3] ^ $w[$t - 8] ^ $w[$t - 14] ^ $w[$t - 16], 1);
+            $t = $t + 1;
+        }
+
+        uint32 $a = $h[0];
+        uint32 $b = $h[1];
+        uint32 $c = $h[2];
+        uint32 $d = $h[3];
+        uint32 $e = $h[4];
+
+        $t = 0;
+
+        while ($t < 80) {
+            uint32 $f = 0;
+            uint32 $k = 0;
+
+            // four rounds of twenty, each with its own mixing function and constant
+            if ($t < 20) {
+                $f = ($b & $c) | ((~$b) & $d);
+                $k = 0x5a827999;
+            } else if ($t < 40) {
+                $f = $b ^ $c ^ $d;
+                $k = 0x6ed9eba1;
+            } else if ($t < 60) {
+                $f = ($b & $c) | ($b & $d) | ($c & $d);
+                $k = 0x8f1bbcdc;
+            } else {
+                $f = $b ^ $c ^ $d;
+                $k = 0xca62c1d6;
+            }
+
+            uint32 $temp = rotl($a, 5) + $f + $e + $k + $w[$t];
+
+            $e = $d;
+            $d = $c;
+            $c = rotl($b, 30);
+            $b = $a;
+            $a = $temp;
+            $t = $t + 1;
+        }
+
+        $h[0] = $h[0] + $a;
+        $h[1] = $h[1] + $b;
+        $h[2] = $h[2] + $c;
+        $h[3] = $h[3] + $d;
+        $h[4] = $h[4] + $e;
+    }
+}
+
+/**
+ * An incremental SHA-1. Feed it with `update` as often as you like, then
+ * `finish` hands back the 20 raw digest bytes and resets the hasher, so the
+ * same value can hash the next message.
+ */
+public class Sha1 : Hasher
+{
+    private Blocks<Sha1State> $blocks;
+
+    public constructor()
+    {
+        $this->blocks = Blocks<Sha1State>(Sha1State(), false);
+    }
+
+    /**
+     * Appends `$data` to the message.
+     */
+    public function update(const string& $data) : void
+    {
+        $this->blocks->update($data);
+    }
+
+    /**
+     * Pads the message and returns the digest as 20 raw bytes. The hasher
+     * starts over afterwards.
+     */
+    public function finish() : string
+    {
+        return $this->blocks->finish();
+    }
+}
+
+/**
+ * The SHA-1 digest of `$data`, as its 20 raw bytes.
+ */
+public function sha1(const string& $data) : string
+{
+    $hasher = Sha1();
+
+    $hasher->update($data);
+    return $hasher->finish();
+}

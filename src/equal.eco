@@ -1,0 +1,45 @@
+/**
+ * Comparing secrets without telling the caller where they differ.
+ */
+
+namespace crypto;
+
+/**
+ * Whether `$a` and `$b` hold the same bytes. The time it takes depends only
+ * on the length of `$a`, never on where the first difference is, so it is
+ * safe for comparing a MAC or a token against the expected value. Unequal
+ * lengths are unequal, and the length itself is not treated as a secret.
+ */
+public function equal(const string& $a, const string& $b) : bool
+{
+    if ($a->size() != $b->size()) {
+        return false;
+    }
+
+    uint8 $diff = 0;
+    usize $i = 0;
+
+    while ($i < $a->size()) {
+        $diff = $diff | ($a->byte($i) ^ $b->byte($i));
+        $i = $i + 1;
+    }
+
+    return $diff == 0;
+}
+
+/**
+ * Whether every byte of `$s` is zero, in time that depends only on its
+ * length, the same way `equal` never stops at the first difference.
+ */
+internal function zero(const string& $s) : bool
+{
+    uint8 $any = 0;
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        $any = $any | $s->byte($i);
+        $i = $i + 1;
+    }
+
+    return $any == 0;
+}

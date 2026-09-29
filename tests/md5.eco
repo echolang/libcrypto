@@ -1,0 +1,56 @@
+use crypto::{md5, hex, Md5};
+
+// RFC 1321 appendix A.5 test suite
+
+test md5_empty
+{
+    assert(hex(md5('')) == 'd41d8cd98f00b204e9800998ecf8427e');
+}
+
+test md5_short
+{
+    assert(hex(md5('a')) == '0cc175b9c0f1b6a831c399e269772661');
+    assert(hex(md5('abc')) == '900150983cd24fb0d6963f7d28e17f72');
+    assert(hex(md5('message digest')) == 'f96b697d7cb7938d525a2f31aaf161d0');
+    assert(hex(md5('abcdefghijklmnopqrstuvwxyz')) == 'c3fcd3d76192e4007dfb496cca67e13b');
+}
+
+test md5_alphanumeric
+{
+    string $msg = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+    assert(hex(md5($msg)) == 'd174ab98d277d9f5a5611c2c9f419d9f');
+}
+
+test md5_two_blocks
+{
+    assert(hex(md5(str::repeat('1234567890', 8))) == '57edf4a22be3c955ac49da2e2107b67a');
+}
+
+test md5_million_a
+{
+    $chunk = str::repeat('a', 1000);
+    $hasher = Md5();
+    usize $i = 0;
+
+    while ($i < 1000) {
+        $hasher->update($chunk);
+        $i = $i + 1;
+    }
+
+    assert(hex($hasher->finish()) == '7707d6ae4e027c70eea2a935c2296f21');
+}
+
+test md5_incremental_matches_one_shot
+{
+    Md5 $hasher = Md5();
+
+    // split mid-block and across the 56 byte padding boundary
+    $hasher->update('1234567890123456789012345678901234567890');
+    $hasher->update('1234567890123456789012345678901234567890');
+    assert(hex($hasher->finish()) == '57edf4a22be3c955ac49da2e2107b67a');
+
+    // finish reset the hasher, so it can go again
+    $hasher->update('abc');
+    assert(hex($hasher->finish()) == '900150983cd24fb0d6963f7d28e17f72');
+}

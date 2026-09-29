@@ -1,0 +1,76 @@
+use crypto::{ExchangeKey, AgreeError, seal, open, hex};
+
+// RFC 7748 section 6.1 keys. The expected session key is libsodium's
+// generichash over crypto_scalarmult and the two public keys, smaller first
+
+private function alice() : ExchangeKey
+{
+    ExchangeKey $key = guard ExchangeKey::restore(raw('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a'));
+
+    return $key;
+}
+
+private function bob() : ExchangeKey
+{
+    ExchangeKey $key = guard ExchangeKey::restore(raw('5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb'));
+
+    return $key;
+}
+
+test x25519_rfc7748_public_keys
+{
+    assert(hex(alice()->publicKey()) == '8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a');
+    assert(hex(bob()->publicKey()) == 'de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f');
+}
+
+test agree_is_symmetric_and_matches_libsodium
+{
+    $alice = alice();
+    $bob = bob();
+    string $ab = guard $alice->agree($bob->publicKey());
+    string $ba = guard $bob->agree($alice->publicKey());
+
+    assert($ab == $ba);
+    assert(hex($ab) == '519fb3af2f3f9e310718cf1f8bdec6e26ab64affe730f0f8b43c43b0e8ee52be');
+}
+
+test agree_then_seal
+{
+    ExchangeKey $a = guard ExchangeKey::generate();
+    ExchangeKey $b = guard ExchangeKey::generate();
+    string $ka = guard $a->agree($b->publicKey());
+    string $kb = guard $b->agree($a->publicKey());
+    string $sealed = guard seal($ka, 'hi bob');
+    string $plain = guard open($kb, $sealed);
+
+    assert($plain == 'hi bob');
+
+    ExchangeKey $again = guard ExchangeKey::restore($a->secret());
+
+    assert($again->publicKey() == $a->publicKey());
+}
+
+test agree_rejects_low_order_point
+{
+    // the all zero point has order 1, so every secret maps it to zero
+    string $zero = raw('0000000000000000000000000000000000000000000000000000000000000000');
+    $weak = alice()->agree($zero);
+
+    assert($weak->failed());
+    assert(match ($weak->failure()) {
+        AgreeError::weakKey => true,
+        else => false,
+    });
+}
+
+test agree_rejects_wrong_size
+{
+    $r = alice()->agree('short');
+
+    assert($r->failed());
+    assert(match ($r->failure()) {
+        AgreeError::publicKeySize($got) => $got == 5,
+        else => false,
+    });
+    assert(ExchangeKey::restore('short') == null);
+}

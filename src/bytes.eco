@@ -1,0 +1,74 @@
+/**
+ * The word shuffling every Merkle–Damgård hash in here needs: rotates, and
+ * reading and writing numbers in either byte order.
+ */
+
+namespace crypto;
+
+internal function rotr(uint32 $x, uint32 $n) : uint32
+{
+    return ($x >> $n) | ($x << (32 - $n));
+}
+
+internal function rotl(uint32 $x, uint32 $n) : uint32
+{
+    return ($x << $n) | ($x >> (32 - $n));
+}
+
+/**
+ * Appends the low `$bytes` bytes of `$v`, most significant first.
+ */
+internal function pushBE(string& $out, uint64 $v, usize $bytes) : void
+{
+    usize $i = $bytes;
+
+    while ($i > 0) {
+        $i = $i - 1;
+        $out->push((($v >> (($i * 8) as uint64)) & 0xFF) as uint8);
+    }
+}
+
+/**
+ * Appends the low `$bytes` bytes of `$v`, least significant first.
+ */
+internal function pushLE(string& $out, uint64 $v, usize $bytes) : void
+{
+    usize $i = 0;
+
+    while ($i < $bytes) {
+        $out->push((($v >> (($i * 8) as uint64)) & 0xFF) as uint8);
+        $i = $i + 1;
+    }
+}
+
+/**
+ * The `$bytes` bytes of `$s` from `$at` as one big-endian number.
+ */
+internal function readBE(const string& $s, usize $at, usize $bytes) : uint64
+{
+    uint64 $v = 0;
+    usize $i = 0;
+
+    while ($i < $bytes) {
+        $v = ($v << 8) | ($s->byte($at + $i) as uint64);
+        $i = $i + 1;
+    }
+
+    return $v;
+}
+
+/**
+ * The `$bytes` bytes of `$s` from `$at` as one little-endian number.
+ */
+internal function readLE(const string& $s, usize $at, usize $bytes) : uint64
+{
+    uint64 $v = 0;
+    usize $i = $bytes;
+
+    while ($i > 0) {
+        $i = $i - 1;
+        $v = ($v << 8) | ($s->byte($at + $i) as uint64);
+    }
+
+    return $v;
+}

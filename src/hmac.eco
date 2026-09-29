@@ -1,0 +1,82 @@
+/**
+ * HMAC (RFC 2104) over SHA-256 and SHA-1.
+ */
+
+namespace crypto;
+
+/**
+ * An incremental hash HMAC can run on: `finish` returns the digest and
+ * starts over.
+ */
+internal interface Hasher
+{
+    function update(const string& $data) : void;
+    function finish() : string;
+}
+
+/**
+ * The HMAC-SHA256 of `$data` under `$key`, as its 32 raw bytes. A key longer
+ * than the 64 byte block is hashed first, as RFC 2104 says.
+ */
+public function hmacSha256(const string& $key, const string& $data) : string
+{
+    return hmac(Sha256(), $key, $data);
+}
+
+/**
+ * The HMAC-SHA1 of `$data` under `$key`, as its 20 raw bytes. It's what
+ * TOTP and HOTP run on. A key longer than the 64 byte block is hashed first.
+ */
+public function hmacSha1(const string& $key, const string& $data) : string
+{
+    return hmac(Sha1(), $key, $data);
+}
+
+/**
+ * HMAC over any hash with a 64 byte block. `$hasher` is fresh, and since
+ * `finish` resets it the same one serves the key, the inner and the outer
+ * hash.
+ */
+private function hmac<H: Hasher>(H $hasher, const string& $key, const string& $data) : string
+{
+    string $block = $key;
+
+    if ($key->size() > 64) {
+        $hasher->update($key);
+        $block = $hasher->finish();
+    }
+
+    $hasher->update(hmacPad($block, 0x36 as uint8));
+    $hasher->update($data);
+
+    $digest = $hasher->finish();
+
+    $hasher->update(hmacPad($block, 0x5c as uint8));
+    $hasher->update($digest);
+    return $hasher->finish();
+}
+
+/**
+ * The 64 byte key block with every byte xored with `$pad`. Past the end of
+ * the key the block is zeros, so the pad byte goes in as is.
+ */
+private function hmacPad(const string& $block, uint8 $pad) : string
+{
+    $out = '';
+    usize $i = 0;
+
+    $out->reserve(64);
+
+    while ($i < 64) {
+        uint8 $b = 0;
+
+        if ($i < $block->size()) {
+            $b = $block->byte($i);
+        }
+
+        $out->push($b ^ $pad);
+        $i = $i + 1;
+    }
+
+    return $out;
+}

@@ -1,0 +1,25 @@
+use crypto::unhex;
+
+/**
+ * The bytes a hex literal in a test spells. Stops the test on bad hex,
+ * which is a typo in the test and nothing else.
+ */
+internal function raw(const string& $hex) : string
+{
+    string $bytes = guard unhex($hex);
+
+    return $bytes;
+}
+
+/**
+ * `$s` with the lowest bit of byte `$i` flipped, for checking that every
+ * byte of a sealed message or signature is covered.
+ */
+internal function flipped(const string& $s, usize $i) : string
+{
+    string $out = $s->sub(0, $i)->clone();
+
+    $out->push($s->byte($i) ^ (1 as uint8));
+    $out->append($s->sub($i + 1, $s->size() - $i - 1));
+    return $out;
+}
