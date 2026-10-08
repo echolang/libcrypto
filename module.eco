@@ -11,7 +11,7 @@
  */
 
 #[module: "libcrypto"]
-#[version: "0.3.0"] // x-release-please-version
+#[version: "0.3.1"] // x-release-please-version
 #[epm::license: "MIT"]
 #[epm::description: "authenticated encryption, signatures, key exchange, blake2b, argon2id, sha512, sha256, sha1, md5 and hmac for echolang"]
 
