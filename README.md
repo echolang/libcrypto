@@ -44,7 +44,7 @@ epm add echolang/libcrypto --git https://github.com/echolang/libcrypto --range ^
 
 That writes a `#[requires:]` line and vendors the sources. Echo sees the `crypto` namespace as soon as the module loads. The C (Monocypher plus a tiny shim) rides along from this module's own `#[cc: sources]`. You never write a `#[cc:]` yourself.
 
-Runs on darwin, linux and windows, matching Echo's prebuilts. Randomness is `arc4random_buf` on darwin, `getrandom` on linux and `BCryptGenRandom` on windows. The module links `bcrypt` on windows itself, so there is nothing to add on your side.
+Runs on darwin, linux and windows, matching Echo's prebuilts. Randomness is `arc4random_buf` on darwin, the `getrandom` syscall then `/dev/urandom` on linux, and `BCryptGenRandom` on windows. Linux does not link libc's `getrandom`, so libcrypto adds no glibc 2.25 requirement of its own. The module links `bcrypt` on windows itself, so there is nothing to add on your side.
 
 The shim exists for three things Echo should not say to Monocypher directly: Argon2's work area, an opaque BLAKE2b context, and a copy of the Ed25519 seed so Monocypher can wipe its own scratch instead of yours. Monocypher trusts the sizes it is given. The wrappers check first, because I do not.
 
@@ -281,7 +281,7 @@ string $token = guard random(16) else {
 }
 ```
 
-`random(0)` is an empty string, successfully. On linux, `getrandom` may return short. The wrapper loops until it has filled the buffer, or the kernel refuses. On windows, `BCryptGenRandom` takes a 32-bit length, so a request past 4 GiB goes in several calls, and a failing call hands its NTSTATUS back as `$code`.
+`random(0)` is an empty string, successfully. On linux, the `getrandom` syscall may return short or be interrupted by a signal; the wrapper loops until it has filled the buffer. A kernel that has no such call, or a seccomp filter that refuses it, is remembered, and later fills read `/dev/urandom`. On windows, `BCryptGenRandom` takes a 32-bit length, so a request past 4 GiB goes in several calls, and a failing call hands its NTSTATUS back as `$code`.
 
 ## Hex
 

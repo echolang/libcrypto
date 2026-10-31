@@ -1,8 +1,8 @@
 /**
  * Randomness from the operating system: `arc4random_buf` on darwin,
- * `getrandom` on linux and `BCryptGenRandom` on windows. The first two come
- * from libc and the third from bcrypt, which module.eco links on windows, so
- * this file needs no C of its own.
+ * the `getrandom` syscall on linux (then `/dev/urandom`) and `BCryptGenRandom`
+ * on windows. Linux does not link libc's `getrandom`, so this module adds no
+ * glibc 2.25 requirement of its own.
  */
 
 namespace crypto;
@@ -22,7 +22,75 @@ internal extern {
 }
 #[elif: family == linux]
 internal extern {
-    function getrandom(ptr<uint8> $buf, usize $n, uint32 $flags) : isize;
+    function syscall as c_syscall(int64 $n, variadic_args $args) : int64;
+    function open as c_open(ptr<const uint8> $path, int32 $flags, variadic_args $args) : int32;
+    function read as c_read(int32 $fd, ptr<uint8> $buf, usize $n) : isize;
+    function close as c_close(int32 $fd) : int32;
+    function __errno_location as c_errno_location() : ptr<int32>;
+}
+
+internal const int32 O_RDONLY = 0;
+internal const int32 O_CLOEXEC = 524288;
+internal const int32 EPERM = 1;
+internal const int32 EINTR = 4;
+internal const int32 ENOSYS = 38;
+
+#[if: arch == x86_64]
+internal const int64 SYS_GETRANDOM = 318;
+#[elif: arch == arm64]
+internal const int64 SYS_GETRANDOM = 278;
+#[end]
+
+private struct GetrandomMissing
+{
+    public static atomic<bool> $yes = atomic<bool>(false);
+}
+
+private function linux_errno() : int32
+{
+    ptr<int32> $slot = c_errno_location();
+    return $slot;
+}
+
+private function fill_urandom(ptr<uint8> $buf, usize $n) : status<RandomError>
+{
+    string $path = '/dev/urandom';
+    int32 $fd = c_open($path->cstr(), O_RDONLY | O_CLOEXEC, []);
+
+    if ($fd < 0) {
+        return .error(.unavailable(linux_errno() as int64));
+    }
+
+    status<RandomError> $st = read_all($fd, $buf, $n);
+    c_close($fd);
+    return $st;
+}
+
+private function read_all(int32 $fd, ptr<uint8> $buf, usize $n) : status<RandomError>
+{
+    usize $filled = 0;
+
+    while ($filled < $n) {
+        isize $got = c_read($fd, $buf:$ + $filled, $n - $filled);
+
+        if ($got < 0) {
+            int32 $code = linux_errno();
+
+            if ($code == EINTR) {
+                continue;
+            }
+
+            return .error(.unavailable($code as int64));
+        }
+
+        if ($got == 0) {
+            return .error(.unavailable(0));
+        }
+
+        $filled = $filled + ($got as usize);
+    }
+
+    return .ok;
 }
 #[elif: family == windows]
 internal extern {
@@ -64,12 +132,34 @@ internal function fill(ptr<uint8> $buf, usize $n) : status<RandomError>
 #[elif: family == linux]
     usize $filled = 0;
 
-    // getrandom may return short for large requests or when a signal lands
     while ($filled < $n) {
-        isize $got = getrandom($buf:$ + $filled, $n - $filled, 0);
+        if (GetrandomMissing::$yes->load()) {
+            return fill_urandom($buf:$ + $filled, $n - $filled);
+        }
+
+        int64 $got = c_syscall(
+            SYS_GETRANDOM, [$buf:$ + $filled, ($n - $filled) as int64, 0 as int64]);
 
         if ($got < 0) {
-            return .error(.unavailable($got as int64));
+            int32 $code = linux_errno();
+
+            // a signal landed mid-call, nothing was written
+            if ($code == EINTR) {
+                continue;
+            }
+
+            if ($code != ENOSYS && $code != EPERM) {
+                return .error(.unavailable($code as int64));
+            }
+
+            // a kernel without getrandom, or a seccomp filter refusing it, so this
+            // and every later fill reads /dev/urandom
+            GetrandomMissing::$yes->store(true);
+            continue;
+        }
+
+        if ($got == 0) {
+            return .error(.unavailable(0));
         }
 
         $filled = $filled + ($got as usize);
