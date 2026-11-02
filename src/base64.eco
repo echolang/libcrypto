@@ -1,0 +1,171 @@
+/**
+ * Base64 and base64url (RFC 4648), the text forms tokens, keys and
+ * signatures travel in.
+ */
+
+namespace crypto;
+
+/**
+ * Standard base64 of the raw bytes in `$raw`, with `=` padding.
+ */
+public function base64(const string& $raw) : string
+{
+    return encode64($raw, BASE64, true);
+}
+
+/**
+ * Base64url of the raw bytes in `$raw`: `-` and `_` instead of `+` and `/`,
+ * and no padding, so the text is safe in a URL, a header or a file name.
+ */
+public function base64url(const string& $raw) : string
+{
+    return encode64($raw, BASE64URL, false);
+}
+
+/**
+ * The raw bytes spelled by standard base64 in `$text`. Padding is optional
+ * and whitespace (as inside a PEM block) is skipped. Null on any other
+ * character, on text after the padding, or on a length no encoder produces.
+ */
+public function unbase64(const string& $text) : string?
+{
+    return decode64($text, false);
+}
+
+/**
+ * The raw bytes spelled by base64url in `$text`, padded or not. Null on a
+ * character outside the url alphabet or a length no encoder produces.
+ */
+public function unbase64url(const string& $text) : string?
+{
+    return decode64($text, true);
+}
+
+internal const string BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+internal const string BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/**
+ * Base64 of `$raw` in `$alphabet`, with `=` padding when `$pad` is set.
+ */
+internal function encode64(const string& $raw, const string& $alphabet, bool $pad) : string
+{
+    $out = '';
+    usize $n = $raw->size();
+    usize $i = 0;
+
+    $out->reserve(($n + 2) / 3 * 4);
+
+    while ($i + 3 <= $n) {
+        uint32 $w = (($raw->byte($i) as uint32) << 16) | (($raw->byte($i + 1) as uint32) << 8) | ($raw->byte($i + 2) as uint32);
+        $out->push($alphabet->byte((($w >> 18) & 63) as usize));
+        $out->push($alphabet->byte((($w >> 12) & 63) as usize));
+        $out->push($alphabet->byte((($w >> 6) & 63) as usize));
+        $out->push($alphabet->byte(($w & 63) as usize));
+        $i = $i + 3;
+    }
+
+    usize $rest = $n - $i;
+    if ($rest == 1) {
+        uint32 $w = ($raw->byte($i) as uint32) << 16;
+        $out->push($alphabet->byte((($w >> 18) & 63) as usize));
+        $out->push($alphabet->byte((($w >> 12) & 63) as usize));
+        if ($pad) {
+            $out->append('==');
+        }
+    }
+    if ($rest == 2) {
+        uint32 $w = (($raw->byte($i) as uint32) << 16) | (($raw->byte($i + 1) as uint32) << 8);
+        $out->push($alphabet->byte((($w >> 18) & 63) as usize));
+        $out->push($alphabet->byte((($w >> 12) & 63) as usize));
+        $out->push($alphabet->byte((($w >> 6) & 63) as usize));
+        if ($pad) {
+            $out->append('=');
+        }
+    }
+
+    return $out;
+}
+
+private function decode64(const string& $text, bool $url) : string?
+{
+    $out = '';
+    uint32 $acc = 0;
+    uint32 $bits = 0;
+    usize $digits = 0;
+    usize $padding = 0;
+    usize $i = 0;
+
+    $out->reserve($text->size() / 4 * 3 + 3);
+
+    while ($i < $text->size()) {
+        uint8 $c = $text->byte($i);
+        $i = $i + 1;
+
+        if (!$url && ($c == 32 || $c == 10 || $c == 13 || $c == 9)) {
+            continue;
+        }
+        if ($c == 61) {
+            $padding = $padding + 1;
+            continue;
+        }
+        if ($padding > 0) {
+            return null;
+        }
+
+        uint8 $v = sextet($c, $url);
+        if ($v == 255) {
+            return null;
+        }
+
+        $digits = $digits + 1;
+        $acc = ($acc << 6) | ($v as uint32);
+        $bits = $bits + 6;
+        if ($bits >= 8) {
+            $bits = $bits - 8;
+            $out->push((($acc >> $bits) & 255) as uint8);
+        }
+    }
+
+    if (($acc & ((1 << $bits) - 1)) != 0) {
+        return null;
+    }
+
+    usize $tail = $digits % 4;
+    if ($tail == 1 || $padding > 2) {
+        return null;
+    }
+    if ($padding > 0 && ($digits + $padding) % 4 != 0) {
+        return null;
+    }
+
+    return $out;
+}
+
+private function sextet(uint8 $c, bool $url) : uint8
+{
+    if ($c >= 65 && $c <= 90) {
+        return $c - 65;
+    }
+    if ($c >= 97 && $c <= 122) {
+        return $c - 71;
+    }
+    if ($c >= 48 && $c <= 57) {
+        return $c + 4;
+    }
+    if ($url) {
+        if ($c == 45) {
+            return 62;
+        }
+        if ($c == 95) {
+            return 63;
+        }
+        return 255;
+    }
+    if ($c == 43) {
+        return 62;
+    }
+    if ($c == 47) {
+        return 63;
+    }
+    return 255;
+}

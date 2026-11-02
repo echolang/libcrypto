@@ -1,0 +1,68 @@
+use crypto::{base64, base64url, unbase64, unbase64url};
+
+test base64_rfc4648_vectors
+{
+    assert(base64('') == '');
+    assert(base64('f') == 'Zg==');
+    assert(base64('fo') == 'Zm8=');
+    assert(base64('foo') == 'Zm9v');
+    assert(base64('foob') == 'Zm9vYg==');
+    assert(base64('fooba') == 'Zm9vYmE=');
+    assert(base64('foobar') == 'Zm9vYmFy');
+}
+
+test unbase64_round_trips
+{
+    string $a = guard unbase64('Zm9vYmE=');
+    assert($a == 'fooba');
+    string $b = guard unbase64('Zm9vYg');
+    assert($b == 'foob');
+    string $c = guard unbase64("Zm9v\nYmFy");
+    assert($c == 'foobar');
+    string $none = guard unbase64('');
+    assert($none == '');
+}
+
+test base64url_uses_the_url_alphabet_without_padding
+{
+    string $raw = '';
+    $raw->push(251);
+    $raw->push(255);
+    $raw->push(191);
+    assert(base64($raw) == '+/+/');
+    assert(base64url($raw) == '-_-_');
+    assert(base64url('f') == 'Zg');
+    string $back = guard unbase64url('-_-_');
+    assert($back == $raw);
+    string $padded = guard unbase64url('Zg==');
+    assert($padded == 'f');
+}
+
+test unbase64_rejects_bad_input
+{
+    assert(unbase64('Zm9v!') == null);
+    assert(unbase64('Z') == null);
+    assert(unbase64('Zg=a') == null);
+    assert(unbase64('Zg===') == null);
+    assert(unbase64('-_') == null);
+    assert(unbase64url('+/') == null);
+    assert(unbase64url('Zm 9v') == null);
+}
+
+test binary_round_trip
+{
+    string $raw = '';
+    for ($i = 0; $i < 256; $i++) {
+        $raw->push($i as uint8);
+    }
+    string $std = guard unbase64(base64($raw));
+    assert($std == $raw);
+    string $url = guard unbase64url(base64url($raw));
+    assert($url == $raw);
+}
+
+test unbase64_refuses_non_canonical_tails
+{
+    assert(unbase64('Zh==') == null);
+    assert(unbase64url('Zh') == null);
+}
